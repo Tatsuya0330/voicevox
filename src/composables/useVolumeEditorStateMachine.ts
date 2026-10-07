@@ -1,5 +1,5 @@
 import { computed, ref, shallowRef, watch } from "vue";
-import type { CursorState } from "@/sing/viewHelper";
+import type { CursorState } from "@/song/viewHelper";
 import type {
   VolumePreviewEdit,
   VolumeEditorIdleStateId,
@@ -8,16 +8,18 @@ import type {
   VolumeEditorInput,
   VolumeEditorComputedRefs,
   VolumeEditorTooltipData,
-} from "@/sing/volumeEditorStateMachine/common";
+} from "@/song/volumeEditorStateMachine/common";
 import type { TrackId } from "@/type/preload";
-import type { Tempo } from "@/domain/project/type";
-import { createVolumeEditorStateMachine } from "@/sing/volumeEditorStateMachine";
-import type { VolumeEditableFrameRange } from "@/sing/volumeEditRanges";
+import type { VolumeEditValue } from "@/domain/project/type";
+import { createVolumeEditorStateMachine } from "@/song/volumeEditorStateMachine";
+import type { VolumeEditableFrameRange } from "@/song/volumeEditRanges";
 
 export const useVolumeEditorStateMachine = (
   store: VolumeEditorPartialStore,
   options: {
     getEditableFrameRanges: () => readonly VolumeEditableFrameRange[];
+    /** 表示中のカーブの値。編集可能区間外はnull、範囲外のフレームはundefined。 */
+    getEffectiveVolumeValue: (frame: number) => VolumeEditValue | undefined;
   },
 ) => {
   const refs = {
@@ -26,17 +28,14 @@ export const useVolumeEditorStateMachine = (
     previewVolumeEdit: shallowRef<VolumePreviewEdit | undefined>(undefined),
     previewMode: ref<VolumeEditorPreviewMode>("IDLE"),
     cursorState: ref<CursorState>("UNSET"),
+    showDrawFeedback: ref(false),
     tooltipData: ref<VolumeEditorTooltipData>(),
+    highlightedFrame: ref<number>(),
+    hoverPointer: ref<{ x: number; y: number }>(),
   };
 
   const computedRefs: VolumeEditorComputedRefs = {
     selectedTrackId: computed<TrackId>(() => store.getters.SELECTED_TRACK_ID),
-    playheadTicks: computed<number>(() => store.getters.PLAYHEAD_POSITION),
-    tempos: computed<Tempo[]>(() => store.state.tempos),
-    tpqn: computed<number>(() => store.state.tpqn),
-    zoomX: computed<number>(() => store.state.sequencerZoomX),
-    zoomY: computed<number>(() => store.state.sequencerZoomY),
-    nowPlaying: computed<boolean>(() => store.state.nowPlaying),
   };
 
   const idleStateId = computed<VolumeEditorIdleStateId>(() =>
@@ -68,6 +67,23 @@ export const useVolumeEditorStateMachine = (
     volumePreviewEdit: computed(() => refs.previewVolumeEdit.value),
     previewMode: computed(() => refs.previewMode.value),
     cursorState: computed(() => refs.cursorState.value),
-    tooltipData: computed(() => refs.tooltipData.value),
+    showDrawFeedback: computed(() => refs.showDrawFeedback.value),
+    // ホバー中は、ステートマシンが保持するフレームと座標から、その時点のカーブの値で導く
+    tooltipData: computed<VolumeEditorTooltipData | undefined>(() => {
+      if (refs.tooltipData.value != undefined) {
+        return refs.tooltipData.value;
+      }
+      const frame = refs.highlightedFrame.value;
+      const pointer = refs.hoverPointer.value;
+      if (frame == undefined || pointer == undefined) {
+        return undefined;
+      }
+      const value = options.getEffectiveVolumeValue(frame);
+      if (value == null) {
+        return undefined;
+      }
+      return { db: value, pointerX: pointer.x, pointerY: pointer.y };
+    }),
+    highlightedFrame: computed(() => refs.highlightedFrame.value),
   };
 };
